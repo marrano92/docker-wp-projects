@@ -52,7 +52,20 @@ if [ "$ENABLE_PHP_MY_ADMIN" == "y" ]; then
       PMA_HOST: mysql"
 fi
 
-mkdir "$PROJECT_NAME" && cd "$PROJECT_NAME" && touch docker-compose.yml
+mkdir "projects/$PROJECT_NAME" && cd "projects/$PROJECT_NAME" && touch docker-compose.yml
+mkdir "var" && cd "var" && mkdir "php" && mkdir "sql"
+
+cd "sql" && touch init.sql
+echo "CREATE DATABASE IF NOT EXISTS wordpress;
+      USE wordpress;" > init.sql
+
+cd "php" && touch uploads.ini
+echo "file_uploads = On
+memory_limit = 200M
+upload_max_filesize = 200M
+post_max_size = 200M
+max_execution_time = 600
+" > uploads.ini
 
 cat > docker-compose.yml <<EOL
 version: "2"
@@ -64,10 +77,15 @@ services:
     restart: on-failure:5
     environment:
       MYSQL_ROOT_PASSWORD: $MYSQL_PASS
+      MYSQL_DATABASE: wordpress
+    volumes:
+      - ./public/mysql:/var/lib/mysql
+      - ./var/sql/init.sql:/data/application/init.sql
   wordpress:
     image: wordpress
     volumes:
       - ./public:/var/www/html
+      - ./var/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
     ports:
       - "8080:80"
     restart: on-failure:5
@@ -75,11 +93,47 @@ services:
       - mariadb:mysql
     environment:
       WORDPRESS_DB_PASSWORD: $MYSQL_PASS
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: root
+
+  wordpress-cli:
+    depends_on:
+        - mariadb
+        - wordpress
+    image: wordpress:cli
+    user: xfs
+    environment:
+      WORDPRESS_DB_PASSWORD: $MYSQL_PASS
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: root
+    links:
+        - mariadb:mysql
+    command: >
+        /bin/sh -c '
+        sleep 10;
+        wp core install --path="/var/www/html" --url="http://localhost:8080" --title="Local Wordpress By Docker" --admin_user=admin --admin_password=secret --admin_email=andrea.marrano92@gmail.com;
+        wp plugin install wordpress-seo --activate;
+        wp plugin install elementor --activate;
+        wp plugin install all-in-one-wp-migration --activate;
+        wp plugin install complianz-gdpr;
+        wp plugin install query-monitor --activate;
+        '
+    volumes:
+      - ./public:/var/www/html
   $PHP_MY_ADMIN
   $WORDMOVE
 EOL
 
 docker-compose up -d
+
+touch makefile
+
+echo "start:
+      docker-compose up -d
+shell:
+      docker exec -it $PROJECT_NAME /bin/bash
+stop:
+      docker-compose down" > makefile
 
 if [ "$ENABLE_WORDMOVE" == "y" ]; then
   touch public/movefile.yml
