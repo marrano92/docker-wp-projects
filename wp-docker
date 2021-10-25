@@ -59,6 +59,8 @@ cd "sql" && touch init.sql
 echo "CREATE DATABASE IF NOT EXISTS wordpress;
       USE wordpress;" > init.sql
 
+cd ..
+
 cd "php" && touch uploads.ini
 echo "file_uploads = On
 memory_limit = 200M
@@ -66,6 +68,8 @@ upload_max_filesize = 200M
 post_max_size = 200M
 max_execution_time = 600
 " > uploads.ini
+
+cd .. && cd ..
 
 cat > docker-compose.yml <<EOL
 version: "2"
@@ -83,6 +87,7 @@ services:
       - ./var/sql/init.sql:/data/application/init.sql
   wordpress:
     image: wordpress
+    user: "andreamarrano:andreamarrano"
     volumes:
       - ./public:/var/www/html
       - ./var/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
@@ -129,11 +134,11 @@ docker-compose up -d
 touch makefile
 
 echo "start:
-      docker-compose up -d
+	docker-compose up -d
 shell:
-      docker exec -it $PROJECT_NAME /bin/bash
+  docker exec -it $PROJECT_NAME /bin/bash
 stop:
-      docker-compose down" > makefile
+  docker-compose down" > makefile
 
 if [ "$ENABLE_WORDMOVE" == "y" ]; then
   touch public/movefile.yml
