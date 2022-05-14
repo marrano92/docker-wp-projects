@@ -7,15 +7,6 @@
 echo Welcome to the WordPress Docker Local Environment setup widzard
 
 read -p 'Project Name: ' PROJECT_NAME
-read -sp 'DB Password: ' MYSQL_PASS
-
-if [[ ${#MYSQL_PASS} -ge 6 && "$MYSQL_PASS" == *[A-Z]* && "$MYSQL_PASS" == *[a-z]* && "$MYSQL_PASS" == *[0-9]* ]]; then
-    echo "Password Matches the criteria"
-else
-    echo "Password criteria: Password should be at least 6 characters long with one digit and one Upper case Alphabet"
-    echo "Password does not Match the criteria, exiting..."
-    exit
-fi
 
 while [[ "$ENABLE_PHP_MY_ADMIN" != "y" && "$ENABLE_PHP_MY_ADMIN" != "n" ]]; do
     read -p 'Enable PHPMyAdmin (y/n): ' ENABLE_PHP_MY_ADMIN
@@ -33,10 +24,12 @@ if [ "$ENABLE_WORDMOVE" == "y" ]; then
     links:
       - mariadb:mysql
     image: welaika/wordmove:php7
-    restart: on-failure:5
+    restart: unless-stopped
     volumes:
       - ./public:/html
-      - ~/.ssh:/root/.ssh"
+      - ~/.ssh:/root/.ssh
+    networks:
+      - wordpress_$PROJECT_NAME"
 fi
 
 if [ "$ENABLE_PHP_MY_ADMIN" == "y" ]; then
@@ -48,8 +41,10 @@ if [ "$ENABLE_PHP_MY_ADMIN" == "y" ]; then
       - mariadb:mysql
     environment:
       PMA_USER: root
-      PMA_PASSWORD: $MYSQL_PASS
-      PMA_HOST: mysql"
+      PMA_PASSWORD: ${DB_PASSWORD}
+      PMA_HOST: mysql
+    networks:
+      - wordpress_$PROJECT_NAME"
 fi
 
 mkdir "projects/$PROJECT_NAME" && cd "projects/$PROJECT_NAME" && touch docker-compose.yml
@@ -61,45 +56,119 @@ echo "CREATE DATABASE IF NOT EXISTS wordpress;
 
 cd ..
 
-cd "php" && touch uploads.ini
-echo "file_uploads = On
+#Create upload.ini file
+cd "php"
+
+cat > uploads.ini <<EOL
+file_uploads = On
 memory_limit = 200M
 upload_max_filesize = 200M
 post_max_size = 200M
 max_execution_time = 600
-" > uploads.ini
+EOL
+
+#Create xdebug.ini file
+cat > xdebug.ini <<EOL
+zend_extension=xdebug.so
+xdebug.idekey=docker
+xdebug.log=/dev/stdout
+xdebug.log_level=0
+xdebug.client_port=9003
+xdebug.client_host=host.docker.internal
+xdebug.start_with_request=yes
+xdebug.remote_port=9000
+xdebug.remote_enable=1
+xdebug.remote_autostart=1
+xdebug.remote_connect_back=1
+xdebug.profiler_enable=0
+xdebug.profiler_enable_trigger=1
+xdebug.mode=debug,coverage
+EOL
 
 cd .. && cd ..
 
+cat > .env <<EOL
+DB_CONNECTION=mysql
+DB_HOST=db
+DB_PORT=3306
+DB_DATABASE=wordpress
+DB_USERNAME=marrano_92
+DB_PASSWORD=hutoltalRWy0kq
+EOL
+
+cat > Dockerfile <<EOL
+FROM wordpress
+
+# Arguments defined in docker-compose.yml
+ARG user
+ARG uid
+
+# Install packages under Debian
+RUN apt-get update && \
+    apt-get -y install git
+
+# Install xdebug and active on container
+RUN pecl channel-update pecl.php.net
+RUN pecl install xdebug-2.8.0
+RUN docker-php-ext-enable xdebug
+
+# Create system user to run Composer and Artisan Commands
+RUN useradd -G www-data,root -u $uid -d /home/$user $user
+RUN mkdir -p /home/$user/.composer && \
+    chown -R $user:$user /home/$user
+
+# Get latest Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Set working directory
+WORKDIR /var/www/html
+
+USER $user
+EOL
+
 cat > docker-compose.yml <<EOL
-version: "2"
+version: "3.9"
 services:
+  wordpress:
+    build:
+      context: .
+      args:
+        user: andreamarrano
+        uid: 1001
+      dockerfile: Dockerfile
+    read_only: false
+    volumes:
+      - ./public:/var/www/html
+      - ./var/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+      - ./var/php/xdebug.ini:/usr/local/etc/php/conf.d/xdebug.ini
+    ports:
+      - "8080:80"
+    expose:
+          - 9000
+          - 9003
+    restart: unless-stopped
+    links:
+      - mariadb:mysql
+    environment:
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${DB_DATABASE}
+      WORDPRESS_DB_USER: ${DB_USERNAME}
+    networks:
+      - wordpress_$PROJECT_NAME
+
   mariadb:
     image: mariadb
     ports:
       - "8081:3306"
-    restart: on-failure:5
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: $MYSQL_PASS
       MYSQL_DATABASE: wordpress
     volumes:
       - ./public/mysql:/var/lib/mysql
       - ./var/sql/init.sql:/data/application/init.sql
-  wordpress:
-    image: wordpress
-    user: "andreamarrano:andreamarrano"
-    volumes:
-      - ./public:/var/www/html
-      - ./var/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
-    ports:
-      - "8080:80"
-    restart: on-failure:5
-    links:
-      - mariadb:mysql
-    environment:
-      WORDPRESS_DB_PASSWORD: $MYSQL_PASS
-      WORDPRESS_DB_NAME: wordpress
-      WORDPRESS_DB_USER: root
+    networks:
+      - wordpress_$PROJECT_NAME
 
   wordpress-cli:
     depends_on:
@@ -108,9 +177,9 @@ services:
     image: wordpress:cli
     user: xfs
     environment:
-      WORDPRESS_DB_PASSWORD: $MYSQL_PASS
-      WORDPRESS_DB_NAME: wordpress
-      WORDPRESS_DB_USER: root
+        WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+        WORDPRESS_DB_NAME: ${DB_DATABASE}
+        WORDPRESS_DB_USER: ${DB_USERNAME}
     links:
         - mariadb:mysql
     command: >
@@ -125,11 +194,19 @@ services:
         '
     volumes:
       - ./public:/var/www/html
+    networks:
+      - wordpress_$PROJECT_NAME
+
   $PHP_MY_ADMIN
+
   $WORDMOVE
+
+networks:
+  wordpress_$PROJECT_NAME:
+    driver: bridge
 EOL
 
-docker-compose up -d
+docker-compose build && docker-compose up -d
 
 touch makefile
 
