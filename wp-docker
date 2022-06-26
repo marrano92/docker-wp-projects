@@ -7,10 +7,11 @@
 echo Welcome to the WordPress Docker Local Environment setup widzard
 
 read -p 'Project Name: ' PROJECT_NAME
+read -p 'Project Slug: ' PROJECT_SLUG
 
-while [[ "$ENABLE_PHP_MY_ADMIN" != "y" && "$ENABLE_PHP_MY_ADMIN" != "n" ]]; do
-    read -p 'Enable PHPMyAdmin (y/n): ' ENABLE_PHP_MY_ADMIN
-done
+#while [[ "$ENABLE_PHP_MY_ADMIN" != "y" && "$ENABLE_PHP_MY_ADMIN" != "n" ]]; do
+#    read -p 'Enable PHPMyAdmin (y/n): ' ENABLE_PHP_MY_ADMIN
+#done
 
 while [[ "$ENABLE_WORDMOVE" != "y" && "$ENABLE_WORDMOVE" != "n" ]]; do
     read -p 'Enable WordMove (y/n): ' ENABLE_WORDMOVE
@@ -32,58 +33,12 @@ if [ "$ENABLE_WORDMOVE" == "y" ]; then
       - wordpress_$PROJECT_NAME"
 fi
 
-if [ "$ENABLE_PHP_MY_ADMIN" == "y" ]; then
-  PHP_MY_ADMIN="phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
-    ports:
-      - "8082:80"
-    links:
-      - mariadb:mysql
-    environment:
-      PMA_USER: root
-      PMA_PASSWORD: ${DB_PASSWORD}
-      PMA_HOST: mysql
-    networks:
-      - wordpress_$PROJECT_NAME"
-fi
-
 mkdir "projects/$PROJECT_NAME" && cd "projects/$PROJECT_NAME" && touch docker-compose.yml
 mkdir "var" && cd "var" && mkdir "php" && mkdir "sql"
 
 cd "sql" && touch init.sql
 echo "CREATE DATABASE IF NOT EXISTS wordpress;
       USE wordpress;" > init.sql
-
-cd ..
-
-#Create upload.ini file
-cd "php"
-
-cat > uploads.ini <<EOL
-file_uploads = On
-memory_limit = 200M
-upload_max_filesize = 200M
-post_max_size = 200M
-max_execution_time = 600
-EOL
-
-#Create xdebug.ini file
-cat > xdebug.ini <<EOL
-zend_extension=xdebug.so
-xdebug.idekey=docker
-xdebug.log=/dev/stdout
-xdebug.log_level=0
-xdebug.client_port=9003
-xdebug.client_host=host.docker.internal
-xdebug.start_with_request=yes
-xdebug.remote_port=9000
-xdebug.remote_enable=1
-xdebug.remote_autostart=1
-xdebug.remote_connect_back=1
-xdebug.profiler_enable=0
-xdebug.profiler_enable_trigger=1
-xdebug.mode=debug,coverage
-EOL
 
 cd .. && cd ..
 
@@ -92,130 +47,28 @@ DB_CONNECTION=mysql
 DB_HOST=db
 DB_PORT=3306
 DB_DATABASE=wordpress
-DB_USERNAME=marrano_92
+DB_USERNAME=root
 DB_PASSWORD=hutoltalRWy0kq
+UID=1001
+GID=1001
 EOL
 
-cat > Dockerfile <<EOL
-FROM wordpress
+# Copy php files configuration
+cp -R ../../var/php/. var/php/
 
-# Arguments defined in docker-compose.yml
-ARG user
-ARG uid
+# Copy sql files configuration
+cp -R ../../var/sql/. var/sql/
 
-# Install packages under Debian
-RUN apt-get update && \
-    apt-get -y install git
+# Copy docker files configuration
+cp -R ../../var/docker/. .
 
-# Install xdebug and active on container
-RUN pecl channel-update pecl.php.net
-RUN pecl install xdebug-2.8.0
-RUN docker-php-ext-enable xdebug
+# Copy docker files configuration
+cp -R ../../var/wp/. ./public/
 
-# Create system user to run Composer and Artisan Commands
-RUN useradd -G www-data,root -u $uid -d /home/$user $user
-RUN mkdir -p /home/$user/.composer && \
-    chown -R $user:$user /home/$user
+sed -i "s/NETWORK_NAME/$PROJECT_SLUG/g" ./docker-compose.yml
+sed -i "s/CONTAINER_NAME/$PROJECT_NAME_wordpress_1/g" ./makefile
 
-# Get latest Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
-# Set working directory
-WORKDIR /var/www/html
-
-USER $user
-EOL
-
-cat > docker-compose.yml <<EOL
-version: "3.9"
-services:
-  wordpress:
-    build:
-      context: .
-      args:
-        user: andreamarrano
-        uid: 1001
-      dockerfile: Dockerfile
-    read_only: false
-    volumes:
-      - ./public:/var/www/html
-      - ./var/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
-      - ./var/php/xdebug.ini:/usr/local/etc/php/conf.d/xdebug.ini
-    ports:
-      - "8080:80"
-    expose:
-          - 9000
-          - 9003
-    restart: unless-stopped
-    links:
-      - mariadb:mysql
-    environment:
-      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
-      WORDPRESS_DB_NAME: ${DB_DATABASE}
-      WORDPRESS_DB_USER: ${DB_USERNAME}
-    networks:
-      - wordpress_$PROJECT_NAME
-
-  mariadb:
-    image: mariadb
-    ports:
-      - "8081:3306"
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: $MYSQL_PASS
-      MYSQL_DATABASE: wordpress
-    volumes:
-      - ./public/mysql:/var/lib/mysql
-      - ./var/sql/init.sql:/data/application/init.sql
-    networks:
-      - wordpress_$PROJECT_NAME
-
-  wordpress-cli:
-    depends_on:
-        - mariadb
-        - wordpress
-    image: wordpress:cli
-    user: xfs
-    environment:
-        WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
-        WORDPRESS_DB_NAME: ${DB_DATABASE}
-        WORDPRESS_DB_USER: ${DB_USERNAME}
-    links:
-        - mariadb:mysql
-    command: >
-        /bin/sh -c '
-        sleep 10;
-        wp core install --path="/var/www/html" --url="http://localhost:8080" --title="Local Wordpress By Docker" --admin_user=admin --admin_password=secret --admin_email=andrea.marrano92@gmail.com;
-        wp plugin install wordpress-seo --activate;
-        wp plugin install elementor --activate;
-        wp plugin install all-in-one-wp-migration --activate;
-        wp plugin install complianz-gdpr;
-        wp plugin install query-monitor --activate;
-        '
-    volumes:
-      - ./public:/var/www/html
-    networks:
-      - wordpress_$PROJECT_NAME
-
-  $PHP_MY_ADMIN
-
-  $WORDMOVE
-
-networks:
-  wordpress_$PROJECT_NAME:
-    driver: bridge
-EOL
-
-docker-compose build && docker-compose up -d
-
-touch makefile
-
-echo "start:
-	docker-compose up -d
-shell:
-  docker exec -it $PROJECT_NAME /bin/bash
-stop:
-  docker-compose down" > makefile
+docker-compose build && docker-compose up -d && cd public && sleep 10; composer install
 
 if [ "$ENABLE_WORDMOVE" == "y" ]; then
   touch public/movefile.yml

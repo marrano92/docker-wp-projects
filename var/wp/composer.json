@@ -1,0 +1,43 @@
+{
+  "type": "project",
+  "license": "MIT",
+  "description": "My brilliant WordPress site",
+  "repositories": {
+    "wpackagist": {
+      "type": "composer",
+      "url": "https://wpackagist.org",
+      "canonical": false
+    },
+    "mkpackagist": {
+      "type": "composer",
+      "url": "https://motork:MKPackagist!@packagist.k.motork.io"
+    }
+  },
+  "require": {
+    "php": ">=7.4",
+    "composer/installers": "~2.1.0",
+    "wpackagist-plugin/wordpress-seo": "^19.0",
+    "wpackagist-plugin/elementor": "^3.6.5",
+    "wpackagist-plugin/all-in-one-wp-migration": "^7.60",
+    "wpackagist-plugin/query-monitor": "^3.9",
+    "wpackagist-plugin/optimole-wp": "^3.4",
+    "wpackagist-plugin/duplicate-post": "^4.4",
+    "wpackagist-theme/hello-elementor": "^2.5"
+  },
+  "autoload": {
+    "psr-0": {
+      "ProjectWP\\": "wp-content/"
+    }
+  },
+  "extra": {
+    "installer-paths": {
+      "wp-content/mu-plugins/{$name}/": [
+        "wpackagist-plugin/akismet"
+      ],
+      "wp-content/plugins/{$name}/": [
+        "type:wordpress-plugin"
+      ]
+    },
+    "wordpress-install-dir": "public/"
+  }
+}

@@ -1,0 +1,80 @@
+version: "3.9"
+services:
+
+  wordpress:
+    build:
+      context: .
+      args:
+        user: andreamarrano
+        uid: 1001
+      dockerfile: Dockerfile
+    user: andreamarrano
+    volumes:
+      - ./public:/var/www/html
+      - ./var/php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+      - ./var/php/xdebug.ini:/usr/local/etc/php/conf.d/xdebug.ini
+    expose:
+      - 9000
+      - 9003
+    ports:
+      - "8080:80"
+    links:
+      - mariadb:mysql
+    environment:
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${DB_DATABASE}
+      WORDPRESS_DB_USER: ${DB_USERNAME}
+    restart: unless-stopped
+    networks:
+      - NETWORK_NAME
+
+  wordpress-cli:
+    depends_on:
+        - mariadb
+        - wordpress
+    image: wordpress:cli
+    environment:
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${DB_DATABASE}
+      WORDPRESS_DB_USER: ${DB_USERNAME}
+    links:
+        - mariadb:mysql
+    command: >
+        /bin/sh -c '
+        sleep 10;
+        wp core install --path="/var/www/html" --url="http://localhost:8080" --title="Local Wordpress By Docker" --admin_user=admin --admin_password=secret --admin_email=andrea.marrano92@gmail.com;
+        '
+    volumes:
+      - ./public:/var/www/html
+    networks:
+      - NETWORK_NAME
+
+  mariadb:
+    image: mariadb
+    ports:
+      - "8081:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+    volumes:
+      - ./public/mysql:/var/lib/mysql
+      - ./var/sql/init.sql:/data/application/init.sql
+    restart: unless-stopped
+    networks:
+      - NETWORK_NAME
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    ports:
+      - 8082:80
+    links:
+      - mariadb:mysql
+    environment:
+      PMA_USER: root
+      PMA_PASSWORD: ${DB_PASSWORD}
+      PMA_HOST: mysql
+    networks:
+      - NETWORK_NAME
+
+networks:
+  NETWORK_NAME:
